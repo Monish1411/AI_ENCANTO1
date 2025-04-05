@@ -1,0 +1,388 @@
+import os
+import time
+import logging
+import hashlib
+import requests
+import numpy as np
+from datetime import datetime
+from typing import Dict, Any, Tuple, Optional, List
+from dataclasses import dataclass
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler("voter_verification.log"), logging.StreamHandler()]
+)
+logger = logging.getLogger("VoterVerification")
+
+# Simulated response from Aadhaar API for testing purposes
+# In a real implementation, this would connect to the actual UIDAI API
+class SimulatedAadhaarAPI:
+    def __init__(self, api_key: str = "test_key"):
+        self.api_key = api_key
+        self.database = {
+            "123456789012": {
+                "name": "Rahul Sharma",
+                "dob": "1985-05-15",
+                "gender": "M",
+                "address": "123 Gandhi Road, Mumbai, Maharashtra",
+                "fingerprint_hash": "a1b2c3d4e5f6g7h8i9j0",
+                "iris_hash": "z9y8x7w6v5u4t3s2r1q0",
+                "photo_hash": "p0o9i8u7y6t5r4e3w2q1"
+            },
+            "987654321098": {
+                "name": "Priya Patel",
+                "dob": "1990-10-22",
+                "gender": "F",
+                "address": "456 Nehru Street, Delhi",
+                "fingerprint_hash": "q1w2e3r4t5y6u7i8o9p0",
+                "iris_hash": "m9n8b7v6c5x4z3a2s1d0",
+                "photo_hash": "l0k9j8h7g6f5d4s3a2p1"
+            }
+        }
+    
+    def verify_aadhaar(self, aadhaar_number: str) -> Dict[str, Any]:
+        """Simulate verification of Aadhaar number"""
+        time.sleep(0.5)  # Simulate network delay
+        
+        if aadhaar_number in self.database:
+            return {"status": "success", "exists": True}
+        return {"status": "success", "exists": False}
+    
+    def verify_biometric(self, aadhaar_number: str, biometric_type: str, biometric_data: str) -> Dict[str, Any]:
+        """Simulate verification of biometric data against stored data"""
+        time.sleep(1)  # Simulate processing delay
+        
+        if aadhaar_number not in self.database:
+            return {"status": "error", "message": "Aadhaar number not found"}
+        
+        # Check which biometric is being verified and compare hashes
+        if biometric_type == "fingerprint":
+            stored_hash = self.database[aadhaar_number]["fingerprint_hash"]
+            # In reality, we would use proper biometric matching algorithms
+            # For simulation, we're just checking if the hash matches
+            if self._simulated_match(biometric_data, stored_hash):
+                return {"status": "success", "match": True}
+        elif biometric_type == "iris":
+            stored_hash = self.database[aadhaar_number]["iris_hash"]
+            if self._simulated_match(biometric_data, stored_hash):
+                return {"status": "success", "match": True}
+        elif biometric_type == "face":
+            stored_hash = self.database[aadhaar_number]["photo_hash"]
+            if self._simulated_match(biometric_data, stored_hash):
+                return {"status": "success", "match": True}
+            
+        return {"status": "success", "match": False}
+    
+    def get_citizen_details(self, aadhaar_number: str) -> Dict[str, Any]:
+        """Get citizen details excluding sensitive biometric data"""
+        if aadhaar_number in self.database:
+            data = self.database[aadhaar_number].copy()
+            # Remove sensitive biometric data
+            data.pop("fingerprint_hash")
+            data.pop("iris_hash")
+            data.pop("photo_hash")
+            return {"status": "success", "data": data}
+        return {"status": "error", "message": "Aadhaar number not found"}
+    
+    def _simulated_match(self, provided_data: str, stored_hash: str) -> bool:
+        """Simulate biometric matching - in reality would use specialized algorithms"""
+        # For testing: if provided_data ends with last 5 chars of hash, consider it a match
+        return provided_data.endswith(stored_hash[-5:])
+
+
+@dataclass
+class VoterRecord:
+    voter_id: str
+    aadhaar_number: str
+    name: str
+    constituency: str
+    polling_station: str
+    has_voted: bool = False
+    last_verification_time: Optional[datetime] = None
+    verification_method: Optional[str] = None
+
+
+class VoterDatabase:
+    def __init__(self):
+        self.voters: Dict[str, VoterRecord] = {}
+        self.aadhaar_to_voter: Dict[str, str] = {}
+    
+    def add_voter(self, voter: VoterRecord) -> None:
+        """Add a voter to the database"""
+        self.voters[voter.voter_id] = voter
+        self.aadhaar_to_voter[voter.aadhaar_number] = voter.voter_id
+    
+    def get_voter_by_aadhaar(self, aadhaar_number: str) -> Optional[VoterRecord]:
+        """Lookup voter by Aadhaar number"""
+        voter_id = self.aadhaar_to_voter.get(aadhaar_number)
+        if voter_id:
+            return self.voters.get(voter_id)
+        return None
+    
+    def get_voter_by_id(self, voter_id: str) -> Optional[VoterRecord]:
+        """Lookup voter by voter ID"""
+        return self.voters.get(voter_id)
+    
+    def mark_voter_as_voted(self, voter_id: str, verification_method: str) -> bool:
+        """Mark a voter as having voted"""
+        if voter_id in self.voters and not self.voters[voter_id].has_voted:
+            self.voters[voter_id].has_voted = True
+            self.voters[voter_id].last_verification_time = datetime.now()
+            self.voters[voter_id].verification_method = verification_method
+            return True
+        return False
+
+
+class BiometricVerificationSystem:
+    def __init__(self, api_key: str = "test_key"):
+        self.aadhaar_api = SimulatedAadhaarAPI(api_key)
+        self.voter_db = VoterDatabase()
+        
+        # Initialize with some test data
+        self._initialize_test_data()
+        
+    def _initialize_test_data(self) -> None:
+        """Initialize with test voter data"""
+        self.voter_db.add_voter(VoterRecord(
+            voter_id="VOT123456",
+            aadhaar_number="123456789012",
+            name="Rahul Sharma",
+            constituency="Mumbai South",
+            polling_station="PS001"
+        ))
+        self.voter_db.add_voter(VoterRecord(
+            voter_id="VOT789012",
+            aadhaar_number="987654321098",
+            name="Priya Patel",
+            constituency="New Delhi",
+            polling_station="PS045"
+        ))
+        
+    def verify_voter_identity(self, aadhaar_number: str, biometric_type: str, biometric_data: str) -> Dict[str, Any]:
+        """
+        Verify voter identity using Aadhaar and biometric data
+        
+        Args:
+            aadhaar_number: 12-digit Aadhaar number
+            biometric_type: Type of biometric (fingerprint, iris, face)
+            biometric_data: Encrypted biometric data (in real system)
+            
+        Returns:
+            Dictionary with verification results
+        """
+        logger.info(f"Verifying voter with Aadhaar: {aadhaar_number[-4:]} (last 4 digits)")
+        
+        # Step 1: Verify Aadhaar number exists
+        aadhaar_verification = self.aadhaar_api.verify_aadhaar(aadhaar_number)
+        if not aadhaar_verification.get("exists", False):
+            logger.warning(f"Aadhaar verification failed for number ending with {aadhaar_number[-4:]}")
+            return {"status": "failed", "reason": "aadhaar_not_found"}
+            
+        # Step 2: Verify biometric data
+        biometric_verification = self.aadhaar_api.verify_biometric(
+            aadhaar_number, biometric_type, biometric_data
+        )
+        
+        if not biometric_verification.get("match", False):
+            logger.warning(f"Biometric verification failed for Aadhaar ending with {aadhaar_number[-4:]}")
+            return {"status": "failed", "reason": "biometric_mismatch"}
+            
+        # Step 3: Check if voter is registered
+        voter = self.voter_db.get_voter_by_aadhaar(aadhaar_number)
+        if not voter:
+            logger.warning(f"Voter not found for verified Aadhaar ending with {aadhaar_number[-4:]}")
+            return {"status": "failed", "reason": "voter_not_registered"}
+            
+        # Step 4: Check if voter has already voted
+        if voter.has_voted:
+            logger.warning(f"Voter {voter.voter_id} has already voted at {voter.last_verification_time}")
+            return {
+                "status": "failed", 
+                "reason": "already_voted",
+                "voted_at": voter.last_verification_time.isoformat() if voter.last_verification_time else None,
+                "verification_method": voter.verification_method
+            }
+            
+        # Step 5: Mark voter as verified and return success
+        self.voter_db.mark_voter_as_voted(voter.voter_id, biometric_type)
+        logger.info(f"Voter {voter.voter_id} successfully verified using {biometric_type}")
+        
+        return {
+            "status": "success",
+            "voter_id": voter.voter_id,
+            "name": voter.name,
+            "constituency": voter.constituency,
+            "polling_station": voter.polling_station,
+            "verification_time": datetime.now().isoformat(),
+            "verification_method": biometric_type
+        }
+    
+    def process_offline_verification(self, offline_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Process offline verifications when connectivity is restored
+        
+        Args:
+            offline_data: List of offline verification attempts
+            
+        Returns:
+            List of processed results
+        """
+        results = []
+        for entry in offline_data:
+            # Simulate processing each entry
+            result = self.verify_voter_identity(
+                entry["aadhaar_number"],
+                entry["biometric_type"],
+                entry["biometric_data"]
+            )
+            results.append(result)
+        return results
+
+
+class CloudSyncManager:
+    """Simulates cloud synchronization for the voter database"""
+    
+    def __init__(self, polling_station_id: str, api_endpoint: str = "https://api.votesecure.example.gov.in"):
+        self.polling_station_id = polling_station_id
+        self.api_endpoint = api_endpoint
+        self.offline_queue = []
+        self.last_sync_time = None
+    
+    def sync_voter_status(self, voter_id: str, verification_data: Dict[str, Any]) -> bool:
+        """
+        Sync voter status with the central database
+        
+        Returns True if sync was successful, False if stored for later sync
+        """
+        try:
+            # In a real implementation, this would make an API call
+            # For simulation, we'll just log it
+            logger.info(f"Syncing voter {voter_id} status to cloud")
+            
+            # Simulate successful API call
+            # requests.post(f"{self.api_endpoint}/sync", json={
+            #     "polling_station_id": self.polling_station_id,
+            #     "voter_id": voter_id,
+            #     "verification_data": verification_data,
+            #     "timestamp": datetime.now().isoformat()
+            # })
+            
+            self.last_sync_time = datetime.now()
+            return True
+        except Exception as e:
+            # In case of connection issues, store for later sync
+            logger.warning(f"Failed to sync voter {voter_id}. Storing for later sync. Error: {str(e)}")
+            self.offline_queue.append({
+                "voter_id": voter_id,
+                "verification_data": verification_data,
+                "timestamp": datetime.now().isoformat()
+            })
+            return False
+    
+    def process_offline_queue(self) -> Tuple[int, int]:
+        """
+        Process offline queue when connectivity is restored
+        
+        Returns:
+            Tuple of (success_count, failure_count)
+        """
+        if not self.offline_queue:
+            return (0, 0)
+            
+        success_count = 0
+        failure_count = 0
+        
+        # Process each item in the queue
+        remaining_queue = []
+        for item in self.offline_queue:
+            try:
+                # In a real implementation, this would make an API call
+                logger.info(f"Processing offline sync for voter {item['voter_id']}")
+                
+                # Simulate successful API call
+                # requests.post(f"{self.api_endpoint}/sync", json={
+                #     "polling_station_id": self.polling_station_id,
+                #     "voter_id": item["voter_id"],
+                #     "verification_data": item["verification_data"],
+                #     "timestamp": item["timestamp"],
+                #     "sync_timestamp": datetime.now().isoformat()
+                # })
+                
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Failed to process offline sync for voter {item['voter_id']}: {str(e)}")
+                remaining_queue.append(item)
+                failure_count += 1
+        
+        # Update the queue with only failed items
+        self.offline_queue = remaining_queue
+        self.last_sync_time = datetime.now()
+        
+        return (success_count, failure_count)
+
+
+def simulate_voter_verification():
+    """Simulate the verification process"""
+    # Initialize the verification system
+    verification_system = BiometricVerificationSystem()
+    cloud_sync = CloudSyncManager(polling_station_id="PS001")
+    
+    # Test Case 1: Successful verification
+    print("\n=== Test Case 1: Successful Verification ===")
+    result = verification_system.verify_voter_identity(
+        "123456789012",           # Aadhaar number
+        "fingerprint",            # Biometric type
+        "test_data_g7h8i9j0"      # Simulated fingerprint data (matches last 5 chars)
+    )
+    print(f"Verification Result: {result}")
+    
+    # Sync with cloud
+    if result["status"] == "success":
+        sync_result = cloud_sync.sync_voter_status(result["voter_id"], result)
+        print(f"Cloud Sync: {'Successful' if sync_result else 'Queued for later'}")
+    
+    # Test Case 2: Already Voted
+    print("\n=== Test Case 2: Already Voted ===")
+    result = verification_system.verify_voter_identity(
+        "123456789012",           # Same Aadhaar number (already voted)
+        "fingerprint",
+        "test_data_g7h8i9j0"
+    )
+    print(f"Verification Result: {result}")
+    
+    # Test Case 3: Biometric Mismatch
+    print("\n=== Test Case 3: Biometric Mismatch ===")
+    result = verification_system.verify_voter_identity(
+        "987654321098",           # Valid Aadhaar  
+        "iris",                   # Using iris scan
+        "incorrect_data"          # Doesn't match stored hash
+    )
+    print(f"Verification Result: {result}")
+    
+    # Test Case 4: Successful verification with different biometric
+    print("\n=== Test Case 4: Successful Verification with Iris ===")
+    result = verification_system.verify_voter_identity(
+        "987654321098",           # Valid Aadhaar
+        "iris",                   # Using iris scan
+        "test_data_s2r1q0"        # Correct iris data (matches last 5 chars)
+    )
+    print(f"Verification Result: {result}")
+    
+    # Simulate offline mode and reconnection
+    print("\n=== Test Case 5: Offline Processing ===")
+    # Add to offline queue (simulating connection failure)
+    cloud_sync.offline_queue.append({
+        "voter_id": "VOT789012",
+        "verification_data": result,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    # Process offline queue (simulating connection restoration)
+    success, failure = cloud_sync.process_offline_queue()
+    print(f"Offline processing results: {success} successful, {failure} failed")
+
+
+if __name__ == "__main__":
+    simulate_voter_verification()
