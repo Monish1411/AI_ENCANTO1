@@ -1,6 +1,5 @@
 # AI_ENCANTO1
-Here's a sample README.md file tailored for the frontend code you provided (a basic voter verification UI built with HTML, CSS, and JavaScript):
-________________________________________
+
 📋 Voter Verification Frontend
 This is the frontend interface for a Voter Verification System. It allows users to enter their Voter ID and capture a selfie for face verification. This application is intended to be connected with a Flask-based backend API for processing verification requests.(Backend is not fully workable,is in progress)
 ________________________________________
